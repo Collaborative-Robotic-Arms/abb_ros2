@@ -45,6 +45,8 @@
 #include <abb_rws_client/mapping.hpp>
 #include <abb_hardware_interface/utilities.hpp>
 
+// #include <end_effector/srv/set_gripper_state.hpp>
+
 using RAPIDSymbols = abb::rws::RWSStateMachineInterface::ResourceIdentifiers::RAPID::Symbols;
 
 namespace abb_rws_client
@@ -66,6 +68,10 @@ RWSServiceProviderROS::RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node
   runtime_state_sub_ = node_->create_subscription<abb_rapid_sm_addin_msgs::msg::RuntimeState>(
       "~/sm_addin/runtime_states", 10,
       std::bind(&RWSServiceProviderROS::runtimeStateCallback, this, std::placeholders::_1));
+  
+  core_services_.push_back(node_->create_service<abb_robot_msgs::srv::SetRAPIDBool>(
+      "~/set_gripper_state",
+      std::bind(&RWSServiceProviderROS::setGripperState, this, std::placeholders::_1, std::placeholders::_2)));
 
   core_services_.push_back(node_->create_service<abb_robot_msgs::srv::GetRobotControllerDescription>(
       "~/get_robot_controller_description",
@@ -131,7 +137,7 @@ RWSServiceProviderROS::RWSServiceProviderROS(const rclcpp::Node::SharedPtr& node
       std::bind(&RWSServiceProviderROS::startRAPID, this, std::placeholders::_1, std::placeholders::_2)));
   core_services_.push_back(node_->create_service<abb_robot_msgs::srv::TriggerWithResultCode>(
       "~/stop_rapid", std::bind(&RWSServiceProviderROS::stopRAPID, this, std::placeholders::_1, std::placeholders::_2)));
-
+  
   const auto& system_indicators = robot_controller_description_.system_indicators();
 
   auto has_sm_1_0 = system_indicators.addins().has_state_machine_1_0();
@@ -222,6 +228,291 @@ bool RWSServiceProviderROS::getRCDescription(
 
   return true;
 }
+
+
+// Implementation of the new setGripperState service callback
+bool RWSServiceProviderROS::setGripperState(
+  const std::shared_ptr<abb_robot_msgs::srv::SetRAPIDBool::Request> req,
+  std::shared_ptr<abb_robot_msgs::srv::SetRAPIDBool::Response> res)
+{
+ 
+  // --- IMPORTANT: CONFIGURE THESE FOR YOUR ROBOT'S RAPID CODE ---
+  // These are the RAPID variables that your open_gripper/close_gripper routines will monitor.
+  // They should be PERS (persistent) or VAR (variable) in your RAPID module.
+  const std::string RAPID_MODULE_NAME = "egm"; // Example: assuming a GripperControl module
+  const std::string RAPID_CLOSE_GRIPPER_SYMBOL = "gripper_close"; // RAPID bool variable name
+
+  // Define the expected signal name for gripper commands from the ROS client
+  const std::string GRIPPER_COMMAND_SIGNAL_NAME = "do_gripper"; // Matches your Python client
+  const std::string GRIPPER_OPEN_VALUE = "1"; // Value to trigger open
+  const std::string GRIPPER_CLOSE_VALUE = "0"; // Value to trigger close
+  // ---------------------------------------------------------------
+
+  if (!verifyArgumentRAPIDSymbolPath(req->path, res->result_code, res->message))
+  {
+    RCLCPP_INFO(node_->get_logger(), "CCCCCCCCCCCCCCCCCCCCCCCCCCC1111CCCCC");
+    return true;
+  }
+  if (!verifyAutoMode(res->result_code, res->message))
+  {
+    RCLCPP_INFO(node_->get_logger(), "CCCCCCCCCCCCCCCCCCCCCCCCCCC222CCCCC");
+    return true;
+  }
+  if (!verifyRWSManagerReady(res->result_code, res->message))
+  {
+    RCLCPP_INFO(node_->get_logger(), "CCCCCCCCCCCCCCCCCCCCCCCCCCCC333CCCC");
+    return true;
+  }
+
+  rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
+    abb::rws::RAPIDBool rapid_bool = static_cast<bool>(req->value);
+    RCLCPP_INFO(node_->get_logger(), "CCCCCCCCCCCCCCCCCCCCCCCCCCCC4444CCCC");
+    if (interface.setRAPIDSymbolData(req->path.task, req->path.module, req->path.symbol, rapid_bool))
+    {
+      res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
+      RCLCPP_INFO(node_->get_logger(), "CCCCCCCCCCCCCCCCCCCCCCCCCC5555CCCCCC");
+    }
+    else
+    {
+      res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+      res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+      RCLCPP_INFO(node_->get_logger(), "CCCCCCCCCCCCCCCCCCCCCCCCC66666CCCCCCC");
+      RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+    }
+  });
+
+  return true;
+  // RCLCPP_INFO(node_->get_logger(), "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
+  // if (!verifyArgumentSignal(req->signal, res->result_code, res->message))
+  // {
+  //   RCLCPP_INFO(node_->get_logger(), "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC");
+  //   return true;
+  // }
+  // if (!verifyRWSManagerReady(res->result_code, res->message))
+  // {
+  //   RCLCPP_INFO(node_->get_logger(), "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD");
+  //   return true;
+  // }
+
+  // rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
+  //   if (interface.setIOSignal(req->signal, req->value))
+  //   {
+  //     res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
+  //     RCLCPP_INFO(node_->get_logger(), "MMMMMMMMMMMMMMMMMMMMMMMMMMMMM");
+  //   }
+  //   else
+  //   {
+  //     res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+  //     res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+  //     RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+  //   }
+  // });
+
+  // return true;
+  // // std::string rapid_symbol_to_set;1
+  // std::string action_description;
+  // abb::rws::RAPIDBool rapid_bool_value; // To set the RAPID boolean symbol
+
+  // // 1. Validate incoming ROS service request
+  // if (req->signal == GRIPPER_COMMAND_SIGNAL_NAME)
+  // {
+  //   if (req->value == GRIPPER_OPEN_VALUE)
+  //   {
+  //     rapid_symbol_to_set = RAPID_CLOSE_GRIPPER_SYMBOL;
+  //     rapid_bool_value = false; // Set the boolean to true to trigger open
+  //     action_description = "open";
+  //   }
+  //   else if (req->value == GRIPPER_CLOSE_VALUE)
+  //   {
+  //     rapid_symbol_to_set = RAPID_CLOSE_GRIPPER_SYMBOL;
+  //     rapid_bool_value = true; // Set the boolean to true to trigger close
+  //     action_description = "close";
+  //   }
+  //   else
+  //   {
+  //     res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+  //     res->message = "Invalid value for gripper command: '" + req->value + "'. Expected '" +
+  //                    GRIPPER_OPEN_VALUE + "' or '" + GRIPPER_CLOSE_VALUE + "'.";
+  //     RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+  //     return;
+  //   }
+  // }
+  // else
+  // {
+  //   res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+  //   res->message = "Unknown signal name for gripper service: '" + req->signal + "'. Expected '" +
+  //                  GRIPPER_COMMAND_SIGNAL_NAME + "'.";
+  //   RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+  //   return;
+  // }
+
+  // RCLCPP_INFO(node_->get_logger(),
+  //             "Received request to %s gripper. Setting RAPID symbol: %s::%s to TRUE",
+  //             action_description.c_str(),
+  //             RAPID_MODULE_NAME.c_str(),
+  //             rapid_symbol_to_set.c_str());
+
+  // // 2. Verify robot mode and manager readiness
+  // if (!verifyAutoMode(res->result_code, res->message))
+  // {
+  //   RCLCPP_ERROR(node_->get_logger(), "Failed to %s gripper: Robot not in AUTO mode. Message: %s", action_description.c_str(), res->message.c_str());
+  //   return;
+  // }
+  // if (!verifyRWSManagerReady(res->result_code, res->message))
+  // {
+  //   RCLCPP_ERROR(node_->get_logger(), "Failed to %s gripper: RWS Manager not ready. Message: %s", action_description.c_str(), res->message.c_str());
+  //   return;
+  // }
+
+  // // 3. Execute the RAPID symbol setting via RWSStateMachineInterface
+  
+  // rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface)
+  //  {
+  //   try
+  //   {
+  //     // Set the appropriate RAPID boolean symbol to true
+  //     // Assuming the symbol is in the default task (T_ROB1)
+  //     const std::string RAPID_TASK_NAME = "T_ROB1"; // Default task name for RAPID symbols
+
+  //     if (interface.setRAPIDSymbolData(RAPID_TASK_NAME, RAPID_MODULE_NAME, rapid_symbol_to_set, rapid_bool_value))
+  //     {
+  //       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
+  //       res->message = "Gripper successfully commanded to " + action_description + " via RAPID symbol.";
+  //       RCLCPP_INFO(node_->get_logger(), res->message.c_str());
+  //     }
+  //     else
+  //     {
+  //       res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+  //       res->message = "RWS interface reported failure to set RAPID symbol for " + action_description + " gripper.";
+  //       RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+  //       RCLCPP_DEBUG_STREAM(node_->get_logger(), "RWS Log: " << interface.getLogTextLatestEvent());
+  //     }
+  //   }
+  //   catch (const std::exception& exception)
+  //   {
+  //     res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+  //     res->message = "Exception during RAPID symbol set for " + action_description + " gripper: " + std::string(exception.what());
+  //     RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+  //     RCLCPP_DEBUG_STREAM(node_->get_logger(), "RWS Log: " << interface.getLogTextLatestEvent());
+  //   }
+  //   catch (...)
+  //   {
+  //     res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+  //     res->message = "Unknown exception during RAPID symbol set for " + action_description + " gripper.";
+  //     RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+  //   }
+  // });
+
+}
+  
+
+
+  // Your logic here
+  // res->result_code = 2;
+  // RCLCPP_INFO(this->get_logger(),
+  //             "Received request to set IO signal '%s' to value '%s'",
+  //             req->signal.c_str(), req->value.c_str());
+
+  // Check if the RWS client is initialized
+  // if (!rws_client_)
+  // {
+  //   res->result_code = -1; // Custom error code for client not initialized
+  //   res->message = "RWS client not initialized.";
+  //   RCLCPP_ERROR(this->get_logger(), res->message.c_str());
+  //   return;
+  // }
+
+//   try
+//   {
+//     // Call the RWS client to set the IO signal
+//     // This is the core logic: using the RWS client to interact with the robot
+//     // bool success = rws_client_->setIOSignal(req->signal, req->value);
+//     bool success = true;
+//     if (success)
+//     {
+//       res->result_code = 0; // Success code
+//       res->message = "IO signal set successfully.";
+//       RCLCPP_INFO(node_->get_logger(), res->message.c_str());
+//     }
+//     else
+//     {
+//       // The RWS client's setIOSignal might return false for some failures
+//       res->result_code = 1; // Custom error code for RWS client failure
+//       res->message = "RWS client reported failure to set IO signal.";
+//       RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+//     }
+//   }
+//   catch (const std::exception& e)
+//   {
+//     // Catch any exceptions thrown by the RWS client (e.g., communication error)
+//     res->result_code = -2; // Custom error code for exception
+//     res->message = "Exception during RWS set IO signal: " + std::string(e.what());
+//     RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+//   }
+//   catch (...)
+//   {
+//     // Catch any other unknown exceptions
+//     res->result_code = -3; // Custom error code for unknown exception
+//     res->message = "Unknown exception during RWS set IO signal.";
+//     RCLCPP_ERROR(node_->get_logger(), res->message.c_str());
+//   }
+// }
+
+
+  
+  
+  
+  // res->success = true;
+  // res->message = abb_robot_msgs::msg::ServiceResponses::SUCCESS;
+  
+  
+  
+  // if (!verifyArgumentSignal(req->gripper_signal_name, res->result_code, res->message))
+  // {
+  //   res->success = false; // Set success to false if verification fails
+  //   return true; // Return true to indicate the service call was handled
+  // }
+  // if (!verifyRWSManagerReady(res->result_code, res->message))
+  // {
+  //   res->success = false;
+  //   return true;
+  // }
+  // if (!verifyAutoMode(res->result_code, res->message)) // Gripper control usually requires Auto Mode
+  // {
+  //   res->success = false;
+  //   return true;
+  // }
+
+  // // Convert the boolean 'open' command from the ROS request into a string "1" (HIGH) or "0" (LOW).
+  // // The ABB RWS interface expects digital output values as strings.
+  // std::string signal_value = req->open ? abb::rws::SystemConstants::IOSignals::HIGH : abb::rws::SystemConstants::IOSignals::LOW;
+
+  // // Use the rws_manager_ to execute the RWS service call to set the digital I/O signal.
+  // // The lambda function captures 'req', 'res', 'signal_value', and 'node_' by reference.
+  // rws_manager_.runService([&](abb::rws::RWSStateMachineInterface& interface) {
+  //   // Call the setIOSignal function from the RWSStateMachineInterface.
+  //   // This is the actual call that sends the command to the robot controller.
+  //   if (interface.setIOSignal(req->gripper_signal_name, signal_value))
+  //   {
+  //     // If the RWS call was successful, set the ROS service response fields accordingly.
+  //     res->success = true;
+  //     res->message = abb_robot_msgs::msg::ServiceResponses::SUCCESS;
+  //     res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_SUCCESS;
+  //   }
+  //   else
+  //   {
+  //     // If the RWS call failed, set the ROS service response fields to indicate failure.
+  //     res->success = false;
+  //     res->message = abb_robot_msgs::msg::ServiceResponses::FAILED;
+  //     res->result_code = abb_robot_msgs::msg::ServiceResponses::RC_FAILED;
+  //     // Log the latest event from the RWS interface for debugging purposes.
+  //     RCLCPP_DEBUG_STREAM(node_->get_logger(), interface.getLogTextLatestEvent());
+  //   }
+  // });
+
+  // Return true to indicate that the service request has been processed.
+  // return true;
+// }
 
 bool RWSServiceProviderROS::getFileContents(const abb_robot_msgs::srv::GetFileContents::Request::SharedPtr req,
                                             abb_robot_msgs::srv::GetFileContents::Response::SharedPtr res)

@@ -75,6 +75,9 @@
 #include <abb_robot_msgs/srv/set_speed_ratio.hpp>
 #include <abb_robot_msgs/srv/trigger_with_result_code.hpp>
 
+// #include <end_effector/srv/set_gripper_state.hpp>
+
+
 namespace abb_rws_client
 {
 class RWSServiceProviderROS
@@ -627,6 +630,11 @@ private:
    *
    * \return bool true if RAPID is stopped.
    */
+  bool setGripperState(
+  const std::shared_ptr<abb_robot_msgs::srv::SetRAPIDBool::Request> req,
+  std::shared_ptr<abb_robot_msgs::srv::SetRAPIDBool::Response> res);
+
+                       
   bool verifyRAPIDStopped(uint16_t& result_code, std::string& message);
 
   /**

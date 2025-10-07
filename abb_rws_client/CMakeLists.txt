@@ -52,7 +52,9 @@ target_include_directories(
   include
 )
 
-add_executable(rws_client src/rws_client_node.cpp)
+add_executable(rws_client
+  src/rws_client_node.cpp
+)
 target_link_libraries(rws_client rws_client_lib)
 ament_target_dependencies(rws_client "rclcpp")
 target_include_directories(
@@ -60,6 +62,8 @@ target_include_directories(
   PRIVATE
   include
 )
+
+
 
 #############
 ## Install ##
