@@ -29,9 +29,13 @@ joint_trajectory_controller:
     state_publish_rate: 100.0
     action_monitor_rate: 20.0
     allow_partial_joints_goal: false
+    # --- UPDATED CONSTRAINTS BLOCK ---
     constraints:
-      stopped_velocity_tolerance: 0.0
-      goal_time: 0.0
+      stopped_velocity_tolerance: 0.05  # Changed from 0.0
+      goal_time: 5.0                    # Changed from 0.0
+      default:                          # Added default joint tolerances
+        trajectory: 0.2
+        goal: 0.05
 
 forward_command_controller_position:
   ros__parameters:
